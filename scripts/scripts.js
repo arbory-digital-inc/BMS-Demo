@@ -13,20 +13,6 @@ import {
   loadCSS,
 } from './aem.js';
 
-/**
- * Builds hero block and prepends to main in a new section.
- * @param {Element} main The container element
- */
-function buildHeroBlock(main) {
-  const h1 = main.querySelector('h1');
-  const picture = main.querySelector('picture');
-  // eslint-disable-next-line no-bitwise
-  if (h1 && picture && (h1.compareDocumentPosition(picture) & Node.DOCUMENT_POSITION_PRECEDING)) {
-    const section = document.createElement('div');
-    section.append(buildBlock('hero', { elems: [picture, h1] }));
-    main.prepend(section);
-  }
-}
 
 /**
  * load fonts.css and set a session storage flag
@@ -41,17 +27,181 @@ async function loadFonts() {
 }
 
 /**
- * Builds all synthetic blocks in a container element.
+ * Get all sections that have a data-id attribute and change data-id to id.
+ * @param {*} main The container element
+ * @author JMP
+ */
+function updateSectionIds(main) {
+  main.querySelectorAll('div.section[data-id]:not([data-id=""])').forEach((section) => {
+    section.id = section.getAttribute('data-id');
+    section.removeAttribute('data-id');
+  });
+}
+
+/** JMP Section Group Layout Support */
+
+/*
+ * Separate the page into multiple divs using the dividers.
+*/
+export function buildColumns(wrapper, section, numberOfGroups) {
+  // Create all group divs.
+  for (let i = 1; i <= numberOfGroups; i++) {
+    const noGroupDiv = document.createElement('div');
+    noGroupDiv.classList.add(`group-${i}`);
+    wrapper.append(noGroupDiv);
+  }
+
+  // Sort elements into groups. Every time you hit separator, increment group #.
+  let currentGroupNumber = 1;
+
+  [...section.children].forEach((child) => {
+    const curr = wrapper.querySelector(`.group-${currentGroupNumber}`);
+    if (child.classList.contains('divider-wrapper')) {
+      currentGroupNumber += 1;
+      child.remove();
+    } else {
+      curr.append(child);
+    }
+  });
+
+  // Add all groups back to the page.
+  section.append(wrapper);
+}
+
+/*
+ * Separate the page into multiple accordions using the dividers.
+*/
+export function buildAccordions(wrapper, section, numberOfGroups) {
+  // Create all group divs.
+  for (let i = 1; i <= numberOfGroups; i++) {
+    const summary = document.createElement('summary');
+    summary.className = 'accordion-item-label';
+    summary.classList.add(`accordion-${i}`);
+
+    const body = document.createElement('div');
+    body.className = 'accordion-item-body';
+
+    const details = document.createElement('details');
+    details.className = 'accordion-item';
+    details.classList.add(`accordion-${i}`);
+    details.append(summary, body);
+    wrapper.append(details);
+  }
+
+  // Sort elements into groups. Every time you hit separator, increment group #.
+  let currentGroupNumber = 1;
+
+  [...section.children].forEach((child) => {
+    const curr = wrapper.querySelector(`.accordion-${currentGroupNumber}`);
+    if (child.classList.contains('divider-wrapper')) {
+      currentGroupNumber += 1;
+      const config = readBlockConfig(child.querySelector('div'));
+      curr.querySelector('summary').prepend(config.accordiontitle);
+      child.remove();
+    } else {
+      curr.querySelector('.accordion-item-body').append(child);
+    }
+  });
+
+  const lastItem = wrapper.querySelector(`.accordion-${numberOfGroups} summary`);
+  lastItem.prepend(section.getAttribute('data-accordiontitle'));
+
+  // Add all groups back to the page.
+  section.append(wrapper);
+}
+
+/*
+ * Separate the page into multiple tabs using the dividers.
+*/
+export function buildTabs(wrapper, section, numberOfGroups) {
+  // build tablist
+  const tablist = document.createElement('div');
+  tablist.className = 'tabs-list';
+  tablist.setAttribute('role', 'tablist');
+
+  // Create all tab panels and buttons first.
+  for (let i = 1; i <= numberOfGroups; i++) {
+    const tabpanel = document.createElement('div');
+    tabpanel.className = 'tabs-panel';
+    tabpanel.id = `tabpanel-${i}`;
+    tabpanel.setAttribute('aria-hidden', i !== 1);
+    tabpanel.setAttribute('aria-labelledby', `tab-${i}`);
+    tabpanel.setAttribute('role', 'tabpanel');
+
+    const button = document.createElement('button');
+    button.className = 'tabs-tab';
+    button.id = `tab-${i}`;
+    button.setAttribute('aria-controls', `tabpanel-${i}`);
+    button.setAttribute('aria-selected', i === 1);
+    button.setAttribute('role', 'tab');
+    button.setAttribute('type', 'button');
+    button.addEventListener('click', () => {
+      section.querySelectorAll('[role=tabpanel]').forEach((panel) => {
+        panel.setAttribute('aria-hidden', true);
+      });
+      tablist.querySelectorAll(':scope > button').forEach((btn) => {
+        btn.setAttribute('aria-selected', false);
+      });
+      tabpanel.setAttribute('aria-hidden', false);
+      button.setAttribute('aria-selected', true);
+      // Unhide any nested tabs that are selected.
+      tabpanel.querySelectorAll('button[aria-selected=true]').forEach((selectedButton) => {
+        const controlledPanel = selectedButton.getAttribute('aria-controls');
+        document.getElementById(controlledPanel).setAttribute('aria-hidden', false);
+      });
+    });
+    tablist.append(button);
+    wrapper.append(tabpanel);
+  }
+
+  // Sort elements into groups. Every time you hit separator, increment group #.
+  let currentGroupNumber = 1;
+  [...section.children].forEach((child) => {
+    const currTabPanel = wrapper.querySelector(`#tabpanel-${currentGroupNumber}`);
+    const currTabButton = tablist.querySelector(`#tab-${currentGroupNumber}`);
+    if (child.classList.contains('divider-wrapper')) {
+      currentGroupNumber += 1;
+      const config = readBlockConfig(child.querySelector('div'));
+      currTabButton.innerHTML = config.tabtitle;
+      child.remove();
+    } else {
+      currTabPanel.append(child);
+    }
+  });
+
+  const lastButton = tablist.querySelector(`#tab-${numberOfGroups}`);
+  lastButton.innerHTML = section.getAttribute('data-tabtitle');
+
+  wrapper.prepend(tablist);
+  section.append(wrapper);
+}
+
+/**
+ * Builds multi group layout within a section.
+ * Expect layout to be written as '# column' i.e. '2 column' or '3 column'.
+ * OR to use accordions i.e. '2 accordion' or '3 accordion'.
+ * Only intended to support column groups of 2 or 3. Can support any number of accordions.
  * @param {Element} main The container element
  */
-function buildAutoBlocks(main) {
-  try {
-    buildHeroBlock(main);
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Auto Blocking failed', error);
-  }
+export function buildLayoutContainer(main) {
+  main.querySelectorAll(':scope > .section[data-layout]').forEach((section) => {
+    const wrapper = document.createElement('div');
+    wrapper.classList.add('layout-wrapper');
+    const layoutType = section.getAttribute('data-layout');
+    const numberOfGroups = parseInt(layoutType, 10);
+
+    if (layoutType.includes('accordion')) {
+      wrapper.classList.add('accordion-wrapper');
+      buildAccordions(wrapper, section, numberOfGroups);
+    } else if (layoutType.includes('tabs')) {
+      wrapper.classList.add('tabs-wrapper');
+      buildTabs(wrapper, section, numberOfGroups);
+    } else {
+      buildColumns(wrapper, section, numberOfGroups);
+    }
+  });
 }
+
 
 /**
  * Decorates the main element.
@@ -59,12 +209,11 @@ function buildAutoBlocks(main) {
  */
 // eslint-disable-next-line import/prefer-default-export
 export function decorateMain(main) {
-  // hopefully forward compatible button decoration
-  decorateButtons(main);
   decorateIcons(main);
-  buildAutoBlocks(main);
   decorateSections(main);
+  updateSectionIds(main);
   decorateBlocks(main);
+  buildLayoutContainer(main);
 }
 
 /**
